@@ -94,25 +94,13 @@
 
       const cols = Math.pow(2, Math.ceil(n / 2));
       const rows = Math.pow(2, Math.floor(n / 2));
-      const slotW = W / cols;
-      const slotH = H / rows;
 
-      const leoAspect = W / H;
-      const slotAspect = slotW / slotH;
-      let drawW, drawH;
-      if (leoAspect > slotAspect) {
-        drawW = slotW;
-        drawH = slotW / leoAspect;
-      } else {
-        drawH = slotH;
-        drawW = slotH * leoAspect;
-      }
-      const padX = (slotW - drawW) / 2;
-      const padY = (slotH - drawH) / 2;
+      const tileW = W / cols;
+      const tileH = tileW * (H / W);
 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          ctx.drawImage(img, c * slotW + padX, r * slotH + padY, drawW, drawH);
+          ctx.drawImage(img, c * tileW, r * tileH, tileW, tileH);
         }
       }
     }
