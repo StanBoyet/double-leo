@@ -1,0 +1,21 @@
+name: Daily Discord Notification
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          ZERO=$(date -u -d "2026-04-20" +%s)
+          NOW=$(date -u +%s)
+          DAYS=$(( (NOW - ZERO) / 86400 ))
+          if [ "$DAYS" -lt 0 ]; then DAYS=0; fi
+          PAYLOAD=$(jq -nc --arg content "🧑 **Day ${DAYS}** — Revente & PC repair
+          https://stanboyet.github.io/double-leo/" '{content: $content}')
+          curl -fsS -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
