@@ -89,7 +89,7 @@
       stage.height = H;
       const ctx = stage.getContext('2d');
 
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = getComputedStyle(document.body).backgroundColor;
       ctx.fillRect(0, 0, W, H);
 
       const cols = Math.pow(2, Math.ceil(n / 2));
