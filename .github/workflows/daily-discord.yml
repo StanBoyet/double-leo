@@ -24,29 +24,50 @@ jobs:
 
       - run: npm ci
 
-      - name: Render today.png
-        run: node scripts/render.js
-
-      - name: Commit today.png if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add today.png
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update today.png"
-            git push
-          fi
-
-      - name: Post to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      - name: Compute DAYS
         run: |
           ZERO=$(date -u -d "${DAY_ZERO}" +%s)
           NOW=$(date -u +%s)
           DAYS=$(( (NOW - ZERO) / 86400 ))
           if [ "$DAYS" -lt 0 ]; then DAYS=0; fi
+          echo "DAYS=$DAYS" >> "$GITHUB_ENV"
+
+      - name: Bump og:image cache-buster in index.html
+        run: |
+          sed -i -E "s|(stanboyet\.github\.io/double-leo/today\.png)(\?v=[0-9]+)?|\1?v=${DAYS}|g" index.html
+
+      - name: Render today.png
+        run: node scripts/render.js
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add today.png index.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily update for day ${DAYS}"
+            git push
+          fi
+
+      - name: Wait for GitHub Pages to serve new HTML
+        run: |
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -H "Cache-Control: no-cache" "https://stanboyet.github.io/double-leo/?cb=$(date +%s%N)" || true)
+            if echo "$BODY" | grep -q "today.png?v=${DAYS}\""; then
+              echo "Pages deployed with v=${DAYS}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for Pages deploy" >&2
+          exit 1
+
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
           PAYLOAD=$(jq -nc --arg content "🧑 **Day ${DAYS}** — Revente & PC repair
-          https://stanboyet.github.io/double-leo/" '{content: $content}')
+          https://stanboyet.github.io/double-leo/?d=${DAYS}" '{content: $content}')
           curl -fsS -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
