@@ -4,6 +4,7 @@
 <head>
   <meta charset="utf-8">
   <title>Doubling Leo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 
   <meta name="description" content="Revente & PC repair — one more tile every day.">
   <meta property="og:type" content="website">
@@ -19,63 +20,100 @@
   <meta name="twitter:image" content="https://stanboyet.github.io/double-leo/today.png?v=16">
 
   <style>
-    html,
-    body {
-      margin: 0;
-      padding: 0;
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
       background: #0e0e10;
       color: #e8e8ea;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-      min-height: 100vh;
-    }
-
-    main {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px;
-      box-sizing: border-box;
-      gap: 20px;
+      touch-action: none;
     }
 
     header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
       text-align: center;
+      padding: 14px 16px 24px;
+      background: linear-gradient(#0e0e10ee 40%, transparent);
+      pointer-events: none;
     }
 
     h1 {
-      margin: 0;
-      font-size: clamp(20px, 3vw, 32px);
+      font-size: clamp(16px, 2.5vw, 24px);
       font-weight: 600;
       letter-spacing: -0.01em;
     }
 
-    .date {
-      margin-top: 6px;
-      font-size: clamp(12px, 1.4vw, 14px);
+    .info {
+      margin-top: 4px;
+      font-size: clamp(11px, 1.2vw, 13px);
       color: #8a8a92;
       font-variant-numeric: tabular-nums;
     }
 
-    #stage {
-      max-width: min(100%, 900px);
-      height: auto;
+    canvas {
       display: block;
+      width: 100%; height: 100%;
+      cursor: grab;
+    }
+    canvas:active { cursor: grabbing; }
+
+    .controls {
+      position: fixed;
+      bottom: 20px; right: 20px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .controls button {
+      width: 36px; height: 36px;
+      border: 1px solid #333;
+      background: #1a1a1dee;
+      color: #e8e8ea;
+      font-size: 18px;
       border-radius: 6px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      backdrop-filter: blur(6px);
+    }
+    .controls button:hover { background: #2a2a2dee; }
+
+    .hint {
+      position: fixed;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      font-size: 12px;
+      color: #555;
+      pointer-events: none;
+      transition: opacity 0.6s;
     }
   </style>
 </head>
 
 <body>
-  <main>
-    <header>
-      <h1 id="title">Day … - Revente &amp; PC repair</h1>
-      <div class="date" id="subtitle"></div>
-    </header>
-    <img id="stage" src="./today.png" alt="Doubling Leo tile grid">
-  </main>
+  <header>
+    <h1 id="title">Day &hellip;</h1>
+    <div class="info" id="subtitle"></div>
+  </header>
+
+  <canvas id="stage"></canvas>
+
+  <div class="controls">
+    <button id="btnIn" title="Zoom in">+</button>
+    <button id="btnOut" title="Zoom out">&minus;</button>
+    <button id="btnFit" title="Fit to screen">&#x2750;</button>
+  </div>
+
+  <div class="hint" id="hint">Scroll to zoom &middot; Drag to pan</div>
 
   <script>
     const DAY_ZERO = new Date(2026, 3, 20);
@@ -87,17 +125,196 @@
       return Math.max(0, Math.floor((b - a) / 86400000));
     }
 
-    function formatDate(d) {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
+    const n = daysSince(DAY_ZERO);
+    const cols = 2 ** Math.ceil(n / 2);
+    const rows = 2 ** Math.floor(n / 2);
+    const total = cols * rows;
+
+    const now = new Date();
+    const dateStr = now.getFullYear() + '-'
+      + String(now.getMonth() + 1).padStart(2, '0') + '-'
+      + String(now.getDate()).padStart(2, '0');
+
+    document.getElementById('title').textContent = 'Day ' + n + ' — Revente & PC repair';
+    document.getElementById('subtitle').textContent =
+      dateStr + ' · ' + total.toLocaleString() + ' tiles (' + cols + '×' + rows + ')';
+
+    const canvas = document.getElementById('stage');
+    const ctx = canvas.getContext('2d');
+    const hint = document.getElementById('hint');
+
+    let scale = 1;
+    let ox = 0, oy = 0;
+    let tileAspect = 1;
+    let pattern = null;
+    let ready = false;
+
+    const img = new Image();
+    img.onload = function () {
+      tileAspect = img.naturalHeight / img.naturalWidth;
+      pattern = ctx.createPattern(img, 'repeat');
+      ready = true;
+      resize();
+    };
+    img.src = './leo.jpg';
+
+    function fitToScreen() {
+      const cw = canvas.width, ch = canvas.height;
+      const gridRatio = cols / (rows * tileAspect);
+      const screenRatio = cw / ch;
+      scale = gridRatio > screenRatio ? cw / cols : ch / (rows * tileAspect);
+      ox = (cw - cols * scale) / 2;
+      oy = (ch - rows * scale * tileAspect) / 2;
     }
 
-    const n = daysSince(DAY_ZERO);
-    document.getElementById('title').textContent = `Day ${n} - Revente & PC repair`;
-    document.getElementById('subtitle').textContent = formatDate(new Date());
-    document.getElementById('stage').src = `./today.png?v=${n}`;
+    function clampScale(s) {
+      const cw = canvas.width, ch = canvas.height;
+      const minS = Math.min(cw / cols, ch / (rows * tileAspect)) * 0.5;
+      const maxS = 300;
+      return Math.max(minS, Math.min(maxS, s));
+    }
+
+    function render() {
+      const cw = canvas.width, ch = canvas.height;
+      ctx.fillStyle = '#0e0e10';
+      ctx.fillRect(0, 0, cw, ch);
+      if (!ready) return;
+
+      const tileH = scale * tileAspect;
+      const gridW = cols * scale, gridH = rows * tileH;
+
+      const m = new DOMMatrix();
+      m.translateSelf(ox, oy);
+      m.scaleSelf(scale / img.naturalWidth, tileH / img.naturalHeight);
+      pattern.setTransform(m);
+
+      ctx.fillStyle = pattern;
+      ctx.fillRect(ox, oy, gridW, gridH);
+    }
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      fitToScreen();
+      render();
+    }
+    window.addEventListener('resize', resize);
+
+    function zoomAt(cx, cy, factor) {
+      const newScale = clampScale(scale * factor);
+      const f = newScale / scale;
+      ox = cx - (cx - ox) * f;
+      oy = cy - (cy - oy) * f;
+      scale = newScale;
+      render();
+    }
+
+    let hintVisible = true;
+    function hideHint() {
+      if (!hintVisible) return;
+      hintVisible = false;
+      hint.style.opacity = '0';
+    }
+
+    canvas.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      hideHint();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      zoomAt(e.clientX, e.clientY, factor);
+    }, { passive: false });
+
+    let dragging = false, lastX = 0, lastY = 0;
+
+    canvas.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      lastX = e.clientX; lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+      hideHint();
+    });
+
+    canvas.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      ox += e.clientX - lastX;
+      oy += e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      render();
+    });
+
+    canvas.addEventListener('pointerup', function () { dragging = false; });
+    canvas.addEventListener('pointercancel', function () { dragging = false; });
+
+    canvas.addEventListener('dblclick', function (e) {
+      e.preventDefault();
+      zoomAt(e.clientX, e.clientY, 3);
+    });
+
+    let touches = {};
+    function touchDist(a, b) {
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    }
+
+    canvas.addEventListener('touchstart', function (e) {
+      e.preventDefault();
+      hideHint();
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        var t = e.changedTouches[i];
+        touches[t.identifier] = { x: t.clientX, y: t.clientY };
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', function (e) {
+      e.preventDefault();
+      var ids = Object.keys(touches);
+      if (ids.length === 1 && e.touches.length === 1) {
+        var t = e.touches[0], prev = touches[t.identifier];
+        if (prev) {
+          ox += t.clientX - prev.x;
+          oy += t.clientY - prev.y;
+          touches[t.identifier] = { x: t.clientX, y: t.clientY };
+          render();
+        }
+      } else if (e.touches.length === 2) {
+        var t0 = e.touches[0], t1 = e.touches[1];
+        var p0 = touches[t0.identifier], p1 = touches[t1.identifier];
+        if (p0 && p1) {
+          var oldD = touchDist(p0, p1);
+          var newD = touchDist(t0, t1);
+          if (oldD > 0) {
+            var cx = (t0.clientX + t1.clientX) / 2;
+            var cy = (t0.clientY + t1.clientY) / 2;
+            zoomAt(cx, cy, newD / oldD);
+          }
+        }
+        touches[t0.identifier] = { x: t0.clientX, y: t0.clientY };
+        touches[t1.identifier] = { x: t1.clientX, y: t1.clientY };
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', function (e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        delete touches[e.changedTouches[i].identifier];
+      }
+    });
+
+    document.getElementById('btnIn').addEventListener('click', function () {
+      var cw = canvas.width / (window.devicePixelRatio || 1);
+      var ch = canvas.height / (window.devicePixelRatio || 1);
+      zoomAt(cw / 2, ch / 2, 2);
+    });
+    document.getElementById('btnOut').addEventListener('click', function () {
+      var cw = canvas.width / (window.devicePixelRatio || 1);
+      var ch = canvas.height / (window.devicePixelRatio || 1);
+      zoomAt(cw / 2, ch / 2, 0.5);
+    });
+    document.getElementById('btnFit').addEventListener('click', function () {
+      fitToScreen();
+      render();
+    });
   </script>
 </body>
 
