@@ -1,48 +1,67 @@
 const path = require('path');
-const sharp = require('sharp');
+const fs = require('fs');
+const http = require('http');
+const puppeteer = require('puppeteer');
 
 const ROOT = path.join(__dirname, '..');
-const SRC = path.join(ROOT, 'leo.jpg');
 const OUT = path.join(ROOT, 'today.png');
+const WIDTH = 800;
+const HEIGHT = 800;
 
-const BACKGROUND = { r: 0x0e, g: 0x0e, b: 0x10, alpha: 1 };
-
-function daysSince(zeroIso) {
-  const [y, m, d] = zeroIso.split('-').map(Number);
-  const zero = Date.UTC(y, m - 1, d);
-  const now = new Date();
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return Math.max(0, Math.floor((today - zero) / 86400000));
+function startServer(root) {
+  const mimeTypes = {
+    '.html': 'text/html', '.js': 'text/javascript',
+    '.jpg': 'image/jpeg', '.png': 'image/png',
+  };
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      let url = req.url.split('?')[0];
+      if (url === '/') url = '/index.html';
+      const file = path.join(root, url);
+      fs.readFile(file, (err, data) => {
+        if (err) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'Content-Type': mimeTypes[path.extname(file)] || 'application/octet-stream' });
+        res.end(data);
+      });
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 async function main() {
+  const server = await startServer(ROOT);
+  const port = server.address().port;
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  const page = await browser.newPage();
+  await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle0' });
+
+  await page.waitForFunction(() => window.__doubling && window.__doubling.isReady(), { timeout: 10000 });
+
+  await page.evaluate(() => {
+    document.querySelector('header').style.display = 'none';
+    document.querySelector('.controls').style.display = 'none';
+    document.querySelector('.hint').style.display = 'none';
+    window.__doubling.setZoom(0.5);
+  });
+
+  await page.screenshot({ path: OUT, type: 'png' });
+
+  await browser.close();
+  server.close();
+
   const dayZero = process.env.DAY_ZERO || '2026-04-20';
-  const n = daysSince(dayZero);
-
-  const { width: W, height: H } = await sharp(SRC).metadata();
-
-  const cols = 2 ** Math.ceil(n / 2);
-  const rows = 2 ** Math.floor(n / 2);
-  const tileW = Math.max(1, Math.floor(W / cols));
-  const tileH = Math.max(1, Math.floor((W / cols) * (H / W)));
-
-  const tile = await sharp(SRC).resize(tileW, tileH).toBuffer();
-
-  const composites = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      composites.push({ input: tile, top: r * tileH, left: c * tileW });
-    }
-  }
-
-  await sharp({
-    create: { width: W, height: H, channels: 3, background: BACKGROUND },
-  })
-    .composite(composites)
-    .png()
-    .toFile(OUT);
-
-  console.log(`Rendered day ${n}: ${cols}x${rows} tiles → ${OUT}`);
+  const [y, m, d] = dayZero.split('-').map(Number);
+  const zero = Date.UTC(y, m - 1, d);
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const n = Math.max(0, Math.floor((today - zero) / 86400000));
+  console.log(`Rendered day ${n} screenshot (${WIDTH}x${HEIGHT}) → ${OUT}`);
 }
 
 main().catch((err) => {

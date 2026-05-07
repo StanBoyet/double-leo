@@ -315,6 +315,22 @@
       fitToScreen();
       render();
     });
+
+    window.__doubling = {
+      isReady: function () { return ready; },
+      setZoom: function (fraction) {
+        var cw = canvas.width / (window.devicePixelRatio || 1);
+        var ch = canvas.height / (window.devicePixelRatio || 1);
+        var minS = Math.min(cw / cols, ch / (rows * tileAspect)) * 0.5;
+        var maxS = 300;
+        scale = Math.exp(Math.log(minS) + fraction * (Math.log(maxS) - Math.log(minS)));
+        var gridW = cols * scale;
+        var gridH = rows * scale * tileAspect;
+        ox = (cw - gridW) / 2;
+        oy = (ch - gridH) / 2;
+        render();
+      }
+    };
   </script>
 </body>
 
